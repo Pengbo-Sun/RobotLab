@@ -14,15 +14,15 @@
 
 #GL = 0
 #FCL = 0
-ODE = 0
-PHYSX = 0
+#ODE = 0
+#PHYSX = 0
 #BULLET = 0
-G4 = 0
-PCL = 0
+#G4 = 0
+#PCL = 0
 #PYBIND = 0
 #OPENCV = 0
-GTK = 0
-ROS = 0
-ROS_VERSION = melodic
+#GTK = 0
+#ROS = 0
+#ROS_VERSION = melodic
 #EIGEN = 0
-CERES = 0
+#CERES = 0
