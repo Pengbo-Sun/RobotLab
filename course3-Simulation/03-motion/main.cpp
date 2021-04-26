@@ -7,7 +7,8 @@
 
 //===========================================================================
 
-void using_KOMO_for_IK(){
+void using_KOMO_for_IK()
+{
   //we don't need to instantiate the real world/simluation here
 
   //-- MODEL WORLD configuration, this is the data structure on which you represent
@@ -15,20 +16,25 @@ void using_KOMO_for_IK(){
   C.addFile("../../scenarios/pandasTable.g");
   arr q0 = C.getJointState();
 
-  rai::Frame* obj = C.addFrame("object");
+  rai::Frame *obj = C.addFrame("object");
   obj->setPosition({1., 0., 1.5});
   obj->setQuaternion({1., 0., 1., 0});
   obj->setShape(rai::ST_capsule, {.2, .02});
   obj->setColor({1., .0, 1.});
+
+  //pregrasp pose
+  rai::Frame *pre_grasp = C.addFrame("pre_grasp");
+  pre_grasp->setPosition({1., -0.1, 1.5});
+  pre_grasp->setQuaternion({1., 0., 1., 0});
 
   //-- using the viewer, you can view configurations or paths
   C.watch(true, "model world start state");
 
   //-- optimize a single configuration using KOMO
 
-  KOMO komo;                     //create a solver
-  komo.setModel(C, true);        //tell it use C as the basic configuration (internally, it will create copies of C on which the actual optimization runs)
-  komo.setTiming(1., 1, 1., 1);  //we want to optimize a single step (1 phase, 1 step/phase, duration=1, k_order=1)
+  KOMO komo;                    //create a solver
+  komo.setModel(C, true);       //tell it use C as the basic configuration (internally, it will create copies of C on which the actual optimization runs)
+  komo.setTiming(1., 1, 1., 1); //we want to optimize a single step (1 phase, 1 step/phase, duration=1, k_order=1)
 
   //now add objectives!
 
@@ -36,30 +42,55 @@ void using_KOMO_for_IK(){
   komo.add_qControlObjective({}, 1, 1.); //sos-penalize (with weight=1.) the finite difference joint velocity (k_order=1) between x[-1] (current configuration) and x[0] (to be optimized)
 
   //task objectives:
-  komo.addObjective({}, FS_positionDiff, {"R_gripperCenter", "object"}, OT_eq, {1e2});
+  //komo.addObjective({}, FS_positionDiff, {"R_gripperCenter", "object"}, OT_eq, {1e2});
 
-  //initialize the solver
+  // 1. there is no difference between “the object reaching for the right gripper” and the other way around
+  // komo.addObjective({}, FS_positionDiff, {"object", "R_gripperCenter"}, OT_eq, {1e2});
+  //test the left gripper reaching for the right gripper
+  //komo.addObjective({}, FS_positionRel, {"R_gripperCenter", "L_gripperCenter"}, OT_eq, {1e2});
+  //whats the difference between FS_positionDiff and FS_positionRel?
+
+  // 2. orientation
+  //komo.addObjective({}, FS_quaternionDiff, {"R_gripperCenter", "object"}, OT_eq, {1e2});
+
+  // 3. fixed orientation
+  //komo.addObjective({}, FS_scalarProductXY, {"R_gripperCenter", "object"}, OT_eq, {1e2}, {0.001});
+  //komo.addObjective({}, FS_scalarProductXZ, {"R_gripperCenter", "object"}, OT_eq, {1e2}, {0.001});
+  //optimize the scalarproduct between x of gripper and y of object to zero, x is prependicular to y
+  //it is more flexible than quanternion
+
+  //4.grisping
+  //pre_grasp
+  komo.addObjective({}, FS_positionDiff, {"pre_grasp", "R_gripperCenter"}, OT_eq, {1e2});
+  komo.addObjective({}, FS_scalarProductXY, {"R_gripperCenter", "pre_grasp"}, OT_eq, {1e2});
+  komo.addObjective({}, FS_scalarProductXZ, {"R_gripperCenter", "pre_grasp"}, OT_eq, {1e2});
+  //target?
+  //initialize the solve
   komo.optimize();
 
   //get the joint vector from the optimized configuration
   arr q = komo.getConfiguration_qOrg(0);
-
-  C.setJointState(q); //set your working config into the optimized state
+  C.setJointState(q);                       //set your working config into the optimized state
   C.watch(true, "optimized configuration"); //display it
 
-
+  //final grasp
+  komo.reset();
+  komo.addObjective({}, FS_positionRel, {"R_gripperCenter", "object"}, OT_eq, {1e2});
+  komo.optimize();
+  q = komo.getConfiguration_qOrg(0);
+  C.setJointState(q);                       //set your working config into the optimized state
+  C.watch(true, "optimized configuration"); //display it
   //-- redoing the optimization with the same KOMO object!
   //   (Warning: In doubt, rather create a new KOMO instance for each optimization.)
 
   //let's change an objective:
   std::shared_ptr<Objective> ob = komo.objectives(1); //which is the positionDiff added above
-  ob->feat->setTarget({0., 0., .1}); //new target in that feature space: 10cm height difference
+  ob->feat->setTarget({0., 0., .1});                  //new target in that feature space: 10cm height difference
   //optimize
   komo.optimize(0.); //don't add noise or reinitialize
 
   C.setJointState(komo.getConfiguration_qOrg(0)); //set your working config into the optimized state
-  C.watch(true, "optimized configuration"); //display it
-
+  C.watch(true, "optimized configuration");       //display it
 
   //-- execute this in simulation
   rai::Configuration RealWorld;
@@ -67,28 +98,31 @@ void using_KOMO_for_IK(){
   rai::Simulation S(RealWorld, S._bullet, true);
 
   S.step();
-  S.setMoveTo(q, 2.); //2 seconds to goal
+  S.setMoveTo(q, 2.);  //2 seconds to goal
   S.setMoveTo(q0, 1.); //1 second back home
-  for(uint t=0;;t++){
-    cout <<"time to move: " <<S.getTimeToMove() <<endl;
-    double tau=.001; //can set anything here time...
+  for (uint t = 0;; t++)
+  {
+    cout << "time to move: " << S.getTimeToMove() << endl;
+    double tau = .001; //can set anything here time...
     S.step({}, tau);
     rai::wait(tau);
-    if(S.getTimeToMove()<0.) break;
+    if (S.getTimeToMove() < 0.)
+      break;
   }
   rai::wait();
 }
 
 //===========================================================================
 
-void using_KOMO_for_PathPlanning(){
+void using_KOMO_for_PathPlanning()
+{
   //we don't need to instantiate the real world/simluation here
 
   //-- MODEL WORLD configuration, this is the data structure on which you represent
   rai::Configuration C;
   C.addFile("../../scenarios/pandasTable.g");
 
-  rai::Frame* obj = C.addFrame("object");
+  rai::Frame *obj = C.addFrame("object");
   obj->setPosition({1., 0., 1.5});
   obj->setQuaternion({1., 0., 1., 0});
   obj->setShape(rai::ST_capsule, {.2, .02});
@@ -101,7 +135,7 @@ void using_KOMO_for_PathPlanning(){
 
   KOMO komo;                     //create a solver
   komo.setModel(C, true);        //tell it use C as the basic configuration (internally, it will create copies of C on which the actual optimization runs)
-  komo.setTiming(1., 40, 5., 2);  //we want to optimize a single step (1 phase, 1 step/phase, duration=1, k_order=1)
+  komo.setTiming(1., 40, 5., 2); //we want to optimize a single step (1 phase, 1 step/phase, duration=1, k_order=1)
 
   //now add objectives!
 
@@ -117,7 +151,7 @@ void using_KOMO_for_PathPlanning(){
   komo.optimize();
 
   //get the joint vector from the optimized configuration
-  arr q = komo.getConfiguration_qOrg(komo.T-1);
+  arr q = komo.getConfiguration_qOrg(komo.T - 1);
 
   C.setJointState(q); //set your working config into the optimized state
 
@@ -129,11 +163,12 @@ void using_KOMO_for_PathPlanning(){
 
 //===========================================================================
 
-int main(int argc,char **argv){
+int main(int argc, char **argv)
+{
   rai::initCmdLine(argc, argv);
 
   using_KOMO_for_IK();
-//  using_KOMO_for_PathPlanning();
+  //  using_KOMO_for_PathPlanning();
 
   return 0;
 }
