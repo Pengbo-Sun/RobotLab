@@ -7,7 +7,6 @@
 #include <Kin/viewer.h>
 
 //===========================================================================
-
 void minimal_use_with_webcam()
 {
   Var<byteA> _rgb; // (beyond this course: a 'Var<type>' is mutexed data, into which threads (like a cam) can write)
@@ -29,7 +28,6 @@ void minimal_use_with_webcam()
       cv::Mat rgb = CV(_rgb.get());
       cv::Mat depth = CV(_depth.get());
 
-      cout << "1" << endl;
       if (rgb.total() > 0)
         cv::imshow("OPENCV - rgb", rgb);
       if (depth.total() > 0)
@@ -40,7 +38,6 @@ void minimal_use_with_webcam()
     }
   }
 }
-
 //===========================================================================
 cv::Mat filter_red_pixel(const cv::Mat src)
 {
@@ -68,19 +65,24 @@ cv::Mat filter_red_pixel(const cv::Mat src)
   return output;
 }
 
-auto get_contour(const cv::Mat src) -> std::pair<cv::Mat, std::vector<std::vector<cv::Point>>>
+auto get_contour(const cv::Mat binary) -> std::vector<std::vector<cv::Point>>
 {
-  cv::Mat binary = filter_red_pixel(src);
   std::vector<std::vector<cv::Point>> contours;
   std::vector<cv::Vec4i> hierarchy;
   cv::findContours(binary, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE);
-  cv::Mat contour = src;
+  return contours;
+}
+
+cv::Mat draw_contour(const cv::Mat src, const std::vector<std::vector<cv::Point>> contours)
+{
+  cv::Mat contour = src.clone();
+  std::vector<cv::Vec4i> hierarchy;
   for (size_t i = 0; i < contours.size(); i++)
   {
     cv::Scalar color = cv::Scalar(0, 0, 0);
     cv::drawContours(contour, contours, (int)i, color, 2, cv::LINE_8, hierarchy, 0);
   }
-  return std::make_pair(contour, contours);
+  return contour;
 }
 
 float get_meandepth(cv::Mat const depth, cv::Mat binary_img)
@@ -170,9 +172,9 @@ void use_within_simulation()
         //convert to binary
         cv::Mat binary = filter_red_pixel(rgb);
         //get contour
-        auto contour_pair = get_contour(rgb);
-        cv::Mat rgb_contour = contour_pair.first;
-        std::vector<std::vector<cv::Point>> contours = contour_pair.second;
+
+        std::vector<std::vector<cv::Point>> contours = get_contour(binary);
+        cv::Mat rgb_contour = draw_contour(rgb, contours);
         //calculate the 2D center
         if (contours.size() != 0)
         {
@@ -186,7 +188,7 @@ void use_within_simulation()
           float Y = (y - 180) * Z / f;
           obj->setRelativePosition({X, Y, -Z});
           cv::Point2f center = cv::Point2f(mu.m10 / mu.m00, mu.m01 / mu.m00);
-          cv::Mat imgwithcenter = rgb;
+          cv::Mat imgwithcenter = rgb.clone();
           cv::circle(imgwithcenter, center, 20, cv::Scalar(0, 0, 0), 2);
           //cv::imshow("OPENCV - center", imgwithcenter);
         }
@@ -194,8 +196,8 @@ void use_within_simulation()
         if (rgb.total() > 0)
         {
           //cv::imshow("OPENCV - rgb", rgb);
-          //cv::imshow("OPENCV - binary", binary);
-          //cv::imshow("OPENCV- contour", rgb_contour);
+          cv::imshow("OPENCV - binary", binary);
+          cv::imshow("OPENCV- contour", rgb_contour);
         }
         //if (depth.total() > 0)
         //  cv::imshow("OPENCV - depth", 0.5 * depth); //white=2meters
@@ -255,6 +257,67 @@ void multipleCameras()
 }
 
 //===========================================================================
+cv::Mat detect_background(cv::Mat const temp, cv::Mat const src)
+{
+  cv::Mat output, temp_grey, src_grey;
+  cv::cvtColor(temp, temp_grey, CV_BGR2GRAY);
+  cv::cvtColor(src, src_grey, CV_BGR2GRAY);
+  cv::absdiff(temp_grey, src_grey, output);
+  cv::threshold(output, output, 80, 255, cv::THRESH_BINARY);
+
+  return output;
+}
+
+void substract_background()
+{
+  Var<byteA> _rgb; // (beyond this course: a 'Var<type>' is mutexed data, into which threads (like a cam) can write)
+  Var<floatA> _depth;
+
+#if 0 //using ros
+  RosCamera cam(_rgb, _depth, "cameraRosNodeMarc", "/camera/rgb/image_raw", "/camera/depth/image_rect");
+  //  RosCamera kin(_rgb, _depth, "cameraRosNodeMarc", "/kinect/rgb/image_rect_color", "/kinect/depth_registered/sw_registered/image_rect_raw", true);
+#else //using a webcam
+  OpencvCamera cam(_rgb);
+#endif
+
+  cv::Mat first_img;
+  //looping images through opencv
+  for (uint i = 0; i < 1000; i++)
+  {
+    cout << i << endl;
+    _rgb.waitForNextRevision();
+    {
+      cv::Mat rgb = CV(_rgb.get());
+      //blur the img
+      //cv::GaussianBlur(rgb, rgb, cv::Size(7, 7), 1, 1);
+
+      // store the first image
+      if (i == 0)
+      {
+        first_img = rgb.clone();
+      }
+      else
+      {
+        cv::Mat binary = detect_background(first_img, rgb);
+        std::vector<std::vector<cv::Point>> contours = get_contour(binary);
+        cv::Mat rgb_contour = draw_contour(rgb, contours);
+
+        cv::Mat depth = CV(_depth.get());
+        if (rgb.total() > 0)
+        {
+          cv::imshow("OPENCV - binary", binary);
+          cv::imshow("OPENCV- contour", rgb_contour);
+          // cv::imshow("OPENCV - rgb", rgb);
+        }
+        if (depth.total() > 0)
+          cv::imshow("OPENCV - depth", 0.5 * depth); //white=2meters
+        int key = cv::waitKey(1);
+        if ((key & 0xff) == 'q')
+          break;
+      }
+    }
+  }
+}
 
 int main(int argc, char **argv)
 {
@@ -263,6 +326,6 @@ int main(int argc, char **argv)
   //minimal_use_with_webcam();
   use_within_simulation();
   //multipleCameras();
-
+  substract_background();
   return 0;
 }
