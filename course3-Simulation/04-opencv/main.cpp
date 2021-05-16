@@ -119,7 +119,7 @@ void use_within_simulation()
   rai::Frame *obj = C.addFrame("object");
   obj->setPosition({0, 0, 0});
   obj->setQuaternion({0, 0, 0, 1});
-  obj->setShape(rai::ST_sphere, {0.1, 0.1});
+  obj->setShape(rai::ST_sphere, {0.05, 0.05});
   obj->setColor({1., .0, 1.});
 
   rai::ConfigurationViewer V;
@@ -140,7 +140,7 @@ void use_within_simulation()
   byteA _rgb;
   floatA _depth;
   arr points;
-  double tau = .01; //time step
+  double tau = .5; //time step
 
   //move the robot to become visible
   q = S.get_q();
@@ -155,7 +155,7 @@ void use_within_simulation()
 
     //grab sensor readings from the simulation
     q = S.get_q();
-    if (!(t % 10))
+    if (!(t % 2))
     {
       S.getImageAndDepth(_rgb, _depth); //we don't need images with 100Hz, rendering is slow
 
@@ -185,12 +185,12 @@ void use_within_simulation()
           float x = mu.m10 / mu.m00;
           float y = mu.m01 / mu.m00;
           float X = (x - 320) * Z / f;
-          float Y = (y - 180) * Z / f;
+          float Y = (y - 180) * (-Z) / f;
           obj->setRelativePosition({X, Y, -Z});
           cv::Point2f center = cv::Point2f(mu.m10 / mu.m00, mu.m01 / mu.m00);
           cv::Mat imgwithcenter = rgb.clone();
           cv::circle(imgwithcenter, center, 20, cv::Scalar(0, 0, 0), 2);
-          //cv::imshow("OPENCV - center", imgwithcenter);
+          cv::imshow("OPENCV - center", imgwithcenter);
         }
 
         if (rgb.total() > 0)
@@ -257,7 +257,7 @@ void multipleCameras()
 }
 
 //===========================================================================
-cv::Mat detect_background(cv::Mat const temp, cv::Mat const src)
+cv::Mat binary_background(cv::Mat const temp, cv::Mat const src)
 {
   cv::Mat output, temp_grey, src_grey;
   cv::cvtColor(temp, temp_grey, CV_BGR2GRAY);
@@ -298,7 +298,7 @@ void substract_background()
       }
       else
       {
-        cv::Mat binary = detect_background(first_img, rgb);
+        cv::Mat binary = binary_background(first_img, rgb);
         std::vector<std::vector<cv::Point>> contours = get_contour(binary);
         cv::Mat rgb_contour = draw_contour(rgb, contours);
 
@@ -324,8 +324,8 @@ int main(int argc, char **argv)
   rai::initCmdLine(argc, argv);
 
   //minimal_use_with_webcam();
-  use_within_simulation();
   //multipleCameras();
+  use_within_simulation();
   substract_background();
   return 0;
 }
