@@ -12,6 +12,12 @@ table2 (world){
     friction:.1
 }
 
+tables3(world){
+  shape:ssBox, Q:<t(-1.5 0.4 1.0>, size:[.2 .5 .05 .01], color:[.3 .3 .3]
+    contact, logical:{ }
+    friction:.1
+}
+
 #L_lift (table){ joint:transZ, limits:[0 .5] }
 
 Prefix: "L_"
@@ -30,10 +36,10 @@ Delete L_finger1
 Delete L_finger2
 
 
-camera(R_panda_joint7){
-    Q:<t(0 0 -.155) d(-90 0 1 0)>,
-    shape:marker, size:[.1],
-    focalLength:0.895, width:640, height:360, zRange:[.5 100]
+camera(R_gripper){
+    Q:<t(0 0.1 0) d(90 1 0 0 )>,
+    shape:marker, size:[.3],
+    focalLength:0.895, width:640, height:360, zRange:[.1 100]
 }
 
 boardgreen(L_gripper) { Q:<t(0 0 -.155) d(0 0 1 0)> shape:cylinder, size:[0.01 0.15], color:[0 255 0] }
@@ -41,9 +47,9 @@ boardred(boardgreen) { Q:<t(0 0 0) d(0 0 1 0)> shape:cylinder, size:[0.02 0.1], 
 boardframe(boardred){ Q:<t(0 0 0) d(0 0 1 0)> shape:marker, size:[0.3 0.3 0.3], color:[255 0 0] }
 
 
-dart1{ shape:cylinder, size:[0.1 0.01], color:[255 0 0],X:<[-1.5,0., 0.7, 0, 0, 1, 0]>}
-dart2{ shape:cylinder, size:[0.1 0.01], color:[255 0 0],X:<[-1.5,0.2, 0.7, 0, 0, 1, 0]>}
-dart3{ shape:cylinder, size:[0.1 0.01], color:[255 0 0],X:<[-1.5,0.4, 0.7, 0, 0, 1, 0]>}
+dart1{ shape:cylinder, size:[0.15 0.01], color:[0 0 255],mass:0.2,X:<[-1.5,0.2, 1.07, 0, 0, 1, 0]>,contact=1}
+dart2{ shape:cylinder, size:[0.15 0.01], color:[0 0 255],mass:0.2,X:<[-1.5,0.4, 1.07, 0, 0, 1, 0]>,contact=1}
+dart3{ shape:cylinder, size:[0.15 0.01], color:[0 0 255],mass:0.2,X:<[-1.5,0.6, 1.07, 0, 0, 1, 0]>,contact=1}
 
 
 Edit L_finger1{ joint:rigid }
