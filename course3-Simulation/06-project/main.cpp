@@ -15,15 +15,42 @@ rai::Configuration RealWorld("../../scenarios/project.g");
 rai::Simulation S(RealWorld, S._bullet, 1);
 rai::Configuration C;
 rai::ConfigurationViewer V;
-const float tau = 0.01;
+const double tau = 0.01;
 std::mutex mtx;
 bool StartMotionGenerator = false;
+double mass = 0.2;
+double g = 9.8;
 
 arr vel = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
 //===========================================================================
-cv::Mat
-filter_blue_pixel(const cv::Mat src)
+cv::Mat filter_red_pixel(const cv::Mat src)
+{
+  cv::Mat output(src.rows, src.cols, CV_8UC1);
+  const std::vector<float> red_threshold = {200, 50, 50};
+  for (int i = 0; i < src.rows; i++)
+  {
+    for (int j = 0; j < src.cols; j++)
+    {
+      //BGR
+      double red_v = (double)src.at<cv::Vec3b>(i, j)[0];
+      double green_v = (double)src.at<cv::Vec3b>(i, j)[1];
+      double blue_v = (double)src.at<cv::Vec3b>(i, j)[2];
+      //check if the pixel is red
+      if (red_v >= red_threshold[0] && green_v < red_threshold[1] && blue_v < red_threshold[2])
+      {
+        output.at<unsigned char>(i, j) = 255;
+      }
+      else
+      {
+        output.at<unsigned char>(i, j) = 0;
+      }
+    }
+  }
+  return output;
+}
+
+cv::Mat filter_blue_pixel(const cv::Mat src)
 {
 
   cv::Mat output(src.rows, src.cols, CV_8UC1);
@@ -95,8 +122,55 @@ void set_robotA_joint(arr &q)
     q.elem(i) = q_current.elem(i);
 }
 
+void visualize_velocity(arr const &v, double const &t)
+{
+  for (double i = 0; i <= t; i += 0.02)
+  {
+    std::string frame_name = "velocity" + std::to_string(i);
+    arr tcp = C["R_gripperCenter"]->getPosition();
+    arr position = v * i + tcp;
+
+    position.elem(2) -= (g * i * i / 2);
+
+    rai::Frame *velocity_frame = C.addFrame(frame_name.c_str());
+    velocity_frame->setColor({1., 1., 0}); //set the color of one objet to red!
+    velocity_frame->setShape(rai::ST_sphere, {.01});
+    velocity_frame->setPosition(position);
+  }
+  V.setConfiguration(C);
+}
+
+void set_velocity(arr const &target, arr &v, double t)
+{
+  double g_offset = g * t * t / 2;
+  arr targetgravity = target;
+  targetgravity.elem(2) += g_offset;
+  v = (targetgravity - C["R_gripperCenter"]->getPosition()) / t;
+  visualize_velocity(v, t);
+}
+
 void generate_circular_motion(arr const center, double const radius, double const angular_velocity)
 {
+  mtx.lock();
+  int step = 10;
+  KOMO komo1;
+  komo1.setModel(C, true);
+  //tell it use C as the basic configuration (internally, it will create copies of C on which the actual optimization runs)
+  komo1.setTiming(1., step, tau, 1);      //we want to optimize a single step (1 phase, 1 step/phase, duration=1, k_order=1)
+  komo1.add_qControlObjective({}, 1, 1.); //sos-penalize (with weight=1.) the finite difference joint velocity (k_order=1) between x[-1] (current configuration) and x[0] (to be optimized)
+
+  komo1.addObjective({}, FS_scalarProductXZ, {"world", "boardred"}, OT_eq, {1e3}, {1});
+  komo1.optimize();
+  for (int i = 0; i < step; i++)
+  {
+    arr q = komo1.getConfiguration_qAll(i);
+    S.step({}, tau);
+    S.setMoveTo(q, tau);
+    C.setJointState(S.get_q()); //set your working config into the optimized state
+    V.setConfiguration(C);
+    rai::wait(tau);
+  }
+  mtx.unlock();
   while (!StartMotionGenerator)
   {
     ;
@@ -116,11 +190,11 @@ void generate_circular_motion(arr const center, double const radius, double cons
     KOMO komo;
     komo.setModel(C, true);
     //tell it use C as the basic configuration (internally, it will create copies of C on which the actual optimization runs)
-    komo.setTiming(1., 1, tau, 2);         //we want to optimize a single step (1 phase, 1 step/phase, duration=1, k_order=1)
-    komo.add_qControlObjective({}, 2, 1.); //sos-penalize (with weight=1.) the finite difference joint velocity (k_order=1) between x[-1] (current configuration) and x[0] (to be optimized)
+    komo.setTiming(1., 1, tau, 1);         //we want to optimize a single step (1 phase, 1 step/phase, duration=1, k_order=1)
+    komo.add_qControlObjective({}, 1, 1.); //sos-penalize (with weight=1.) the finite difference joint velocity (k_order=1) between x[-1] (current configuration) and x[0] (to be optimized)
 
     komo.addObjective({}, FS_positionDiff, {"boardred", "target_frame"}, OT_sos, {1e2}, {0, 0, 0});
-    komo.addObjective({}, FS_scalarProductXZ, {"world", "boardred"}, OT_eq, {1e2}, {1});
+    komo.addObjective({}, FS_scalarProductXZ, {"world", "boardred"}, OT_eq, {1e3}, {1});
     komo.optimize();
     arr q_desired = komo.getConfiguration_qAll(komo.T - 1);
     arr velB = q_desired - S.get_q();
@@ -192,7 +266,7 @@ void move()
 
   rai::Frame *obj = C.addFrame("object");
   obj->setColor({1., 1., 0}); //set the color of one objet to red!
-  obj->setShape(rai::ST_sphere, {.02});
+  obj->setShape(rai::ST_sphere, {.05});
 
   byteA _rgb;
   floatA _depth;
@@ -278,7 +352,7 @@ void move()
     komo3.setTiming(1., 1, tau, 1);         //we want to optimize a single step (1 phase, 1 step/phase, duration=1, k_order=1)
     komo3.add_qControlObjective({}, 1, 1.); //sos-penalize (with weight=1.) the finite difference joint velocity (k_order=1) between x[-1] (current configuration) and x[0] (to be optimized)
 
-    komo3.addObjective({}, FS_positionRel, {"object", "R_gripperCenter"}, OT_sos, {1e3}, {0, 0, 0.02});
+    komo3.addObjective({}, FS_positionRel, {"object", "R_gripperCenter"}, OT_sos, {1e3}, {0, 0, 0});
     //komo.addObjective({}, FS_distance, {"R_gripperCenter", "object"}, OT_sos, {1e4});
     komo3.addObjective({}, FS_scalarProductYZ, {"R_gripperCenter", "world"}, OT_eq, {1e3}, {1});
     //komo3.addObjective({}, FS_scalarProductXZ, {"world", "R_gripperCenter"}, OT_eq, {1e3}, {-1});
@@ -349,12 +423,151 @@ void move()
       q = komo4.getConfiguration_qAll(t);
       S.step();
       S.setMoveTo(q, tau);
-      C.setJointState(q); //set your robot model to match the real q
+      C.setJointState(S.get_q()); //set your robot model to match the real q
       V.setConfiguration(C);
     }
   }
   //start move robotA
-  StartMotionGenerator = true;
+  //StartMotionGenerator = true;
+
+  //detect dartboard
+
+  S.getImageAndDepth(_rgb, _depth); //we don't need images with 100Hz, rendering is slow
+                                    // NEW
+  depthData2pointCloud(points, _depth, Fxypxy);
+  camera_pose = cameraFrame->get_X(); //this is relative to "/base_link"
+  //transform to world frame
+  camera_pose.applyOnPointArray(points);
+  worldFrame->setPointCloud(points, _rgb);
+  V.recopyMeshes(C); //update the model display!
+  V.setConfiguration(C);
+
+  rgb = CV(_rgb);
+  depth = CV(_depth);
+
+  //--<< perception pipeline
+  binary = filter_red_pixel(rgb);
+  //get contour
+  contours = get_contour(binary);
+  bool seeboard = false;
+  //calculate the 2D center
+  if (contours.size() != 0)
+  {
+    seeboard = true;
+    std::vector<cv::Point> contour = contours[0];
+    cv::Mat rgb_contour = draw_contour(rgb, contours);
+    cv::imshow("board", rgb_contour);
+    int k = cv::waitKey(0);
+    cv::Moments mu = cv::moments(contour, true);
+    double Z = get_meandepth(depth, binary);
+    //create a sphere in the mode world
+    double x = mu.m10 / mu.m00;
+    double y = mu.m01 / mu.m00;
+    double X = (x - 320) * Z / f;
+    double Y = (y - 180) * Z / f;
+    arr obj_position = {X, -Y, -Z};
+    //transform to world frame
+    if (!camera_pose.isZero())
+      camera_pose.applyOnPoint(obj_position);
+    obj->setPosition(obj_position);
+  }
+  C.setJointState(S.get_q()); //set your working config into the optimized state
+  V.setConfiguration(C);
+  //estimate the velocity
+  arr vel_cart;
+  set_velocity(obj->getPosition(), vel_cart, 0.5);
+  rai::Frame *motion_frame = C.addFrame("motion_frame");
+  motion_frame->setShape(rai::ST_marker, {0.3, 0.3, 0.3});
+  arr position = C["R_gripperCenter"]->getPosition() + tau * vel_cart;
+  motion_frame->setPosition(position);
+  V.setConfiguration(C);
+  KOMO komo5; //create a solver
+  komo5.setModel(C, true);
+  //tell it use C as the basic configuration (internally, it will create copies of C on which the actual optimization runs)
+  komo5.setTiming(1., 1, tau, 1); //we want to optimize a single step (1 phase, 1 step/phase, duration=1, k_order=1)
+  komo5.add_qControlObjective({}, 1, 1.);
+  komo5.addObjective({1.}, FS_positionDiff, {"R_gripperCenter", "motion_frame"}, OT_sos, {1e2});
+  komo5.optimize();
+  //rotate the gripper
+  q = komo5.getConfiguration_qAll(0);
+  //calaulate the joint velocity
+  arr vel_q = (q - S.get_q()) / tau;
+  for (int i = 7; i < 14; i++)
+  {
+    vel.elem(i) = vel_q.elem(i);
+  }
+  // S.step(-vel, tau, S._velocity);
+  // C.setJointState(S.get_q());
+  // V.setConfiguration(C);
+  arr tcp1 = RealWorld["R_gripperCenter"]->getPosition();
+  S.step(vel, tau, S._velocity);
+  C.setJointState(S.get_q());
+  V.setConfiguration(C);
+  arr tcp2 = RealWorld["R_gripperCenter"]->getPosition();
+  S.step(vel, tau, S._velocity);
+  C.setJointState(S.get_q());
+  V.setConfiguration(C);
+  arr tcp3 = RealWorld["R_gripperCenter"]->getPosition();
+  rai::wait();
+  rai::Frame *dart_frame = C.addFrame("dart_frame");
+  dart_frame->setColor({1., 1., 0}); //set the color of one objet to red!
+  dart_frame->setShape(rai::ST_marker, {0.3, 0.3, 0.3});
+  dart_frame->setPosition(RealWorld["dart3"]->getPosition());
+  V.setConfiguration(C);
+  S.step(vel, tau, S._velocity);
+  rai::wait(tau);
+  dart_frame->setPosition(RealWorld["dart3"]->getPosition());
+  V.setConfiguration(C);
+  rai::wait();
+  S.openGripper("R_gripper", 0.15, .5);
+  rai::wait();
+  S.step(vel, tau, S._velocity);
+  dart_frame->setPosition(RealWorld["dart3"]->getPosition());
+  V.setConfiguration(C);
+  rai::wait();
+  for (int i = 7; i < 14; i++)
+  {
+    vel.elem(i) = 0;
+  }
+  arr po1, po2;
+  for (int i = 0; i < 100; i++)
+  {
+    S.step(vel, tau, S._velocity);
+    if (i == 0)
+    {
+      po1 = RealWorld["dart3"]->getPosition();
+    }
+    if (i == 1)
+    {
+      po2 = RealWorld["dart3"]->getPosition();
+    }
+    dart_frame->setPosition(RealWorld["dart3"]->getPosition());
+    V.setConfiguration(C);
+    rai::wait();
+  }
+  dart_frame->setPosition(RealWorld["dart3"]->getPosition());
+  V.setConfiguration(C);
+  cout << "set velocity to zero" << endl;
+  rai::wait();
+  cout << tcp2 - tcp1 << endl;
+  cout << tcp3 - tcp2 << endl;
+  cout << po2 - po1 << endl;
+  cout << vel_cart << endl;
+  //S.step(vel, tau, S._velocity);
+  //rai::wait();
+
+  /*
+  for (int i = 0; i < 6; i++)
+  {
+    if (i == 1)
+    {
+      S.openGripper("R_gripper", 0.15, .5);
+    }
+    S.step(vel, tau, S._velocity);
+    rai::wait();
+  }
+  */
+
   //start visual servoing
 }
 
