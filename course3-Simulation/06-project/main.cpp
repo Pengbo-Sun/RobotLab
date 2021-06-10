@@ -145,7 +145,7 @@ void set_velocity(arr const &target, arr &v, double t)
   double g_offset = g * t * t / 2;
   arr targetgravity = target;
   targetgravity.elem(2) += g_offset;
-  v = (targetgravity - C["R_gripperCenter"]->getPosition()) / t;
+  v = (targetgravity - RealWorld["R_gripperCenter"]->getPosition()) / t;
   visualize_velocity(v, t);
 }
 
@@ -158,7 +158,7 @@ void generate_circular_motion(arr const center, double const radius, double cons
   //tell it use C as the basic configuration (internally, it will create copies of C on which the actual optimization runs)
   komo1.setTiming(1., step, tau, 1);      //we want to optimize a single step (1 phase, 1 step/phase, duration=1, k_order=1)
   komo1.add_qControlObjective({}, 1, 1.); //sos-penalize (with weight=1.) the finite difference joint velocity (k_order=1) between x[-1] (current configuration) and x[0] (to be optimized)
-
+  komo1.addObjective({}, FS_position, {"L_gripper"}, OT_eq, {1e3}, {1.3782, -0.0187, 0.8});
   komo1.addObjective({}, FS_scalarProductXZ, {"world", "boardred"}, OT_eq, {1e3}, {1});
   komo1.optimize();
   for (int i = 0; i < step; i++)
@@ -219,6 +219,7 @@ void generate_circular_motion(arr const center, double const radius, double cons
 
 void move()
 {
+  cout << RealWorld["L_gripper"]->getPosition() << endl;
   cout << "move" << endl;
   arr velA;
   Value diff;
@@ -227,7 +228,7 @@ void move()
   // define a detection frame
   rai::Frame *detection_frame = C.addFrame("detection_frame");
   detection_frame->setShape(rai::ST_marker, {0.1, 0.1, 0.1});
-  detection_frame->setPosition({-2.1, 0.5, 1.2});
+  detection_frame->setPosition({-1.6, 0, 1.2});
 
   rai::wait();
   KOMO komo1;
@@ -239,7 +240,7 @@ void move()
 
   komo1.addObjective({1.0, 1.0}, FS_positionDiff, {"R_gripper", "detection_frame"}, OT_sos, {1e3}, {0, 0, 0});
   komo1.addObjective({1.0, 1.0}, FS_scalarProductZZ, {"R_gripper", "world"}, OT_eq, {1e2}, {1});
-  komo1.addObjective({1.0, 1.0}, FS_scalarProductXY, {"R_gripper", "world"}, OT_eq, {1e2}, {-1});
+  komo1.addObjective({1.0, 1.0}, FS_scalarProductXX, {"R_gripper", "world"}, OT_eq, {1e2}, {1});
   komo1.optimize();
 
   arr q;
@@ -321,9 +322,9 @@ void move()
   komo2.setTiming(1., step, step * tau, 1); //we want to optimize a single step (1 phase, 1 step/phase, duration=1, k_order=1)
   komo2.add_qControlObjective({}, 1, 1.);   //sos-penalize (with weight=1.) the finite difference joint velocity (k_order=1) between x[-1] (current configuration) and x[0] (to be optimized)
 
-  komo2.addObjective({1.0, 1.0}, FS_positionDiff, {"R_gripper", "object"}, OT_sos, {1e3}, {-0.3, 0, 0});
+  komo2.addObjective({1.0, 1.0}, FS_positionDiff, {"R_gripper", "object"}, OT_sos, {1e3}, {0, -0.3, 0});
   komo2.addObjective({1.0, 1.0}, FS_scalarProductYZ, {"R_gripper", "world"}, OT_eq, {1e2}, {1});
-  komo2.addObjective({1.0, 1.0}, FS_scalarProductXZ, {"world", "R_gripper"}, OT_eq, {1e2}, {-1});
+  komo2.addObjective({1.0, 1.0}, FS_scalarProductYZ, {"world", "R_gripper"}, OT_eq, {1e2}, {-1});
   komo2.optimize();
   for (int i = 0; i < step; i++)
   {
@@ -410,10 +411,11 @@ void move()
     komo4.setTiming(2., step, tau * step, 2); //we want to optimize a single step (1 phase, 1 step/phase, duration=1, k_order=1)
     komo4.add_qControlObjective({}, 2, 1.);   //sos-penalize (with weight=1.) the finite difference joint velocity (k_order=1) between x[-1] (current configuration) and x[0] (to be optimized)
 
-    komo4.addObjective({1.}, FS_positionDiff, {"R_gripperCenter", "object"}, OT_sos, {1e2}, {0, 0, 0.5});
+    komo4.addObjective({1.}, FS_positionDiff, {"R_gripperCenter", "object"}, OT_sos, {1e2}, {0, 0, 1});
     komo4.addObjective({1.}, FS_scalarProductYZ, {"R_gripperCenter", "world"}, OT_eq, {1e2}, {1});
     komo4.addObjective({2.}, FS_scalarProductZZ, {"R_gripperCenter", "world"}, OT_eq, {1e3}, {1});
     komo4.addObjective({2.}, FS_scalarProductYX, {"R_gripperCenter", "world"}, OT_eq, {1e3}, {1});
+    komo4.addObjective({2.}, FS_positionDiff, {"R_gripperCenter", "lift_frame"}, OT_sos, {1e2});
 
     komo4.optimize();
     //lift the gripper to the initial pose of the ball
@@ -474,100 +476,85 @@ void move()
   C.setJointState(S.get_q()); //set your working config into the optimized state
   V.setConfiguration(C);
   //estimate the velocity
+  float t_fly = 0.5;
   arr vel_cart;
-  set_velocity(obj->getPosition(), vel_cart, 0.5);
+  set_velocity(obj->getPosition(), vel_cart, t_fly);
   rai::Frame *motion_frame = C.addFrame("motion_frame");
   motion_frame->setShape(rai::ST_marker, {0.3, 0.3, 0.3});
-  arr position = C["R_gripperCenter"]->getPosition() + tau * vel_cart;
+  arr position = RealWorld["dart1"]->getPosition();
   motion_frame->setPosition(position);
   V.setConfiguration(C);
-  KOMO komo5; //create a solver
-  komo5.setModel(C, true);
-  //tell it use C as the basic configuration (internally, it will create copies of C on which the actual optimization runs)
-  komo5.setTiming(1., 1, tau, 1); //we want to optimize a single step (1 phase, 1 step/phase, duration=1, k_order=1)
-  komo5.add_qControlObjective({}, 1, 1.);
-  komo5.addObjective({1.}, FS_positionDiff, {"R_gripperCenter", "motion_frame"}, OT_sos, {1e2});
-  komo5.optimize();
-  //rotate the gripper
-  q = komo5.getConfiguration_qAll(0);
-  //calaulate the joint velocity
-  arr vel_q = (q - S.get_q()) / tau;
+
+  //compute jacobian
+  diff = C.feature(FS_position, {"R_gripperCenter"})->eval(C);
+  arr release_pose = RealWorld["R_gripperCenter"]->getPosition();
+  //transform it to joint velocity
+  arr vel_q = pseudoInverse(diff.J, NoArr, 1e-2) * vel_cart;
+  cout << "q " << vel_q << endl;
+  //move backwars firstly
   for (int i = 7; i < 14; i++)
   {
-    vel.elem(i) = vel_q.elem(i);
+    vel.elem(i) = -vel_q.elem(i);
   }
-  // S.step(-vel, tau, S._velocity);
-  // C.setJointState(S.get_q());
-  // V.setConfiguration(C);
-  arr tcp1 = RealWorld["R_gripperCenter"]->getPosition();
-  S.step(vel, tau, S._velocity);
+
+  for (int i = 0; i < 6; i++)
+  {
+    S.step(vel, tau, S._velocity);
+    position = RealWorld["dart1"]->getPosition();
+    motion_frame->setPosition(position);
+    rai::wait();
+  }
+  C.setJointState(S.get_q());
+  for (int i = 7; i < 14; i++)
+  {
+    vel.elem(i) = -vel.elem(i);
+  }
+  for (int i = 0; i < 10; i++)
+  {
+    cout << "length" << length(release_pose - RealWorld["R_gripperCenter"]->getPosition()) << std::endl;
+    if (length(release_pose - RealWorld["R_gripperCenter"]->getPosition()) < 0.01)
+    {
+      cout << "release" << std::endl;
+      S.openGripper("R_gripper", 0.15, .3);
+      //for (int i = 7; i < 14; i++)
+      //{
+      //  vel.elem(i) = 0;
+      //}
+    }
+    arr po1_q = S.get_q();
+    arr po1_tcp = RealWorld["R_gripperCenter"]->getPosition();
+    S.step(vel, tau, S._velocity);
+    arr po2_tcp = RealWorld["R_gripperCenter"]->getPosition();
+    arr po2_q = S.get_q();
+    cout << "joint diff" << po2_q - po1_q << endl;
+    cout << "vel_q" << vel_q << endl;
+    cout << "tcp diff" << po2_tcp - po1_tcp << endl;
+    cout << "vel_tcp" << vel_cart << endl;
+    position = RealWorld["dart1"]->getPosition();
+    motion_frame->setPosition(position);
+    rai::wait();
+  }
   C.setJointState(S.get_q());
   V.setConfiguration(C);
-  arr tcp2 = RealWorld["R_gripperCenter"]->getPosition();
-  S.step(vel, tau, S._velocity);
-  C.setJointState(S.get_q());
-  V.setConfiguration(C);
-  arr tcp3 = RealWorld["R_gripperCenter"]->getPosition();
-  rai::wait();
-  rai::Frame *dart_frame = C.addFrame("dart_frame");
-  dart_frame->setColor({1., 1., 0}); //set the color of one objet to red!
-  dart_frame->setShape(rai::ST_marker, {0.3, 0.3, 0.3});
-  dart_frame->setPosition(RealWorld["dart3"]->getPosition());
-  V.setConfiguration(C);
-  S.step(vel, tau, S._velocity);
-  rai::wait(tau);
-  dart_frame->setPosition(RealWorld["dart3"]->getPosition());
-  V.setConfiguration(C);
-  rai::wait();
-  S.openGripper("R_gripper", 0.15, .5);
-  rai::wait();
-  S.step(vel, tau, S._velocity);
-  dart_frame->setPosition(RealWorld["dart3"]->getPosition());
-  V.setConfiguration(C);
-  rai::wait();
+
   for (int i = 7; i < 14; i++)
   {
     vel.elem(i) = 0;
   }
-  arr po1, po2;
+
   for (int i = 0; i < 100; i++)
   {
+    arr po1 = RealWorld["dart1"]->getPosition();
+
     S.step(vel, tau, S._velocity);
-    if (i == 0)
-    {
-      po1 = RealWorld["dart3"]->getPosition();
-    }
-    if (i == 1)
-    {
-      po2 = RealWorld["dart3"]->getPosition();
-    }
-    dart_frame->setPosition(RealWorld["dart3"]->getPosition());
+    position = RealWorld["dart1"]->getPosition();
+    motion_frame->setPosition(position);
+    C.setJointState(S.get_q());
     V.setConfiguration(C);
+    cout << "pos diff" << position - po1 << endl;
+    cout << "vel " << vel_cart << endl;
     rai::wait();
   }
-  dart_frame->setPosition(RealWorld["dart3"]->getPosition());
-  V.setConfiguration(C);
-  cout << "set velocity to zero" << endl;
-  rai::wait();
-  cout << tcp2 - tcp1 << endl;
-  cout << tcp3 - tcp2 << endl;
-  cout << po2 - po1 << endl;
-  cout << vel_cart << endl;
-  //S.step(vel, tau, S._velocity);
-  //rai::wait();
-
-  /*
-  for (int i = 0; i < 6; i++)
-  {
-    if (i == 1)
-    {
-      S.openGripper("R_gripper", 0.15, .5);
-    }
-    S.step(vel, tau, S._velocity);
-    rai::wait();
-  }
-  */
-
   //start visual servoing
 }
 
