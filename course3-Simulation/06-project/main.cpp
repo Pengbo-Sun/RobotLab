@@ -534,7 +534,6 @@ void move()
       //
       //arr vel = 2. * pseudoInverse(J, NoArr, 1e-2) * (-y);
       diff = C.feature(FS_position, {"R_gripperCenter"})->eval(C);
-      vel_cart.elem(0) += 2;
       //transform it to joint velocity
       arr vel_q = pseudoInverse(diff.J, NoArr) * vel_cart;
       //move backwars firstly
@@ -558,10 +557,11 @@ void move()
       for (int i = 0; i < 10; i++)
       {
         cout << "length" << length(release_pose - RealWorld["R_gripperCenter"]->getPosition()) << std::endl;
-        if (length(release_pose - RealWorld["R_gripperCenter"]->getPosition()) < 0.02)
+        if (length(release_pose - RealWorld["R_gripperCenter"]->getPosition()) < 0.06)
         {
           cout << "release" << std::endl;
           S.openGripper("R_gripper", 0.15, 3);
+          S.step(vel, tau, S._velocity);
           S.step(vel, tau, S._velocity);
           //for (int i = 7; i < 14; i++)
           //{
