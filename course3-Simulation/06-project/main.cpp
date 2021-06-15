@@ -18,8 +18,13 @@ rai::ConfigurationViewer V;
 const double tau = 0.01;
 std::mutex mtx;
 bool StartMotionGenerator = false;
+bool ReadyThrow = false;
 double mass = 0.2;
 double g = 9.8;
+
+//set the intrinsic camera parameters
+double f = 0.895 * 360; //focal length is needed in pixels (height!), not meters!
+arr Fxypxy = {f, f, 320., 180.};
 
 arr vel = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
@@ -160,10 +165,10 @@ void generate_circular_motion(arr const center, double const radius, double cons
   KOMO komo1;
   komo1.setModel(C, true);
   //tell it use C as the basic configuration (internally, it will create copies of C on which the actual optimization runs)
-  komo1.setTiming(1., step, tau, 1);      //we want to optimize a single step (1 phase, 1 step/phase, duration=1, k_order=1)
-  komo1.add_qControlObjective({}, 1, 1.); //sos-penalize (with weight=1.) the finite difference joint velocity (k_order=1) between x[-1] (current configuration) and x[0] (to be optimized)
+  komo1.setTiming(1., step, step * tau, 1); //we want to optimize a single step (1 phase, 1 step/phase, duration=1, k_order=1)
+  komo1.add_qControlObjective({}, 1, 1.);   //sos-penalize (with weight=1.) the finite difference joint velocity (k_order=1) between x[-1] (current configuration) and x[0] (to be optimized)
   //komo1.addObjective({}, FS_position, {"L_gripper"}, OT_eq, {1e3}, {0.3782, -0.0187, 0.8});//max z=1.2
-  komo1.addObjective({}, FS_position, {"L_gripper"}, OT_eq, {1e3}, {0.3782, -0.0187, 1});
+  komo1.addObjective({}, FS_position, {"L_gripper"}, OT_eq, {1e3}, center);
   komo1.addObjective({}, FS_scalarProductXZ, {"world", "boardred"}, OT_eq, {1e3}, {1});
   komo1.optimize();
   for (int i = 0; i < step; i++)
@@ -176,48 +181,47 @@ void generate_circular_motion(arr const center, double const radius, double cons
     rai::wait(tau);
   }
   mtx.unlock();
-  while (!StartMotionGenerator)
-  {
-    ;
-  }
   float t = 0;
   arr target = center;
   rai::Frame *target_frame = C.addFrame("target_frame");
   target_frame->setShape(rai::ST_marker, {0.1, 0.1, 0.1});
   while (true)
   {
-    //compute the pose on the circle in each step in y-z plane
-    target(1) = center(1) + radius * cos(angular_velocity * t);
-    target(2) = center(2) + radius * sin(angular_velocity * t);
-    target_frame->setPose(target);
-
-    //create a solver
-    KOMO komo;
-    komo.setModel(C, true);
-    //tell it use C as the basic configuration (internally, it will create copies of C on which the actual optimization runs)
-    komo.setTiming(1., 1, tau, 1);         //we want to optimize a single step (1 phase, 1 step/phase, duration=1, k_order=1)
-    komo.add_qControlObjective({}, 1, 1.); //sos-penalize (with weight=1.) the finite difference joint velocity (k_order=1) between x[-1] (current configuration) and x[0] (to be optimized)
-
-    komo.addObjective({}, FS_positionDiff, {"boardred", "target_frame"}, OT_sos, {1e2}, {0, 0, 0});
-    komo.addObjective({}, FS_scalarProductXZ, {"world", "boardred"}, OT_eq, {1e3}, {1});
-    komo.optimize();
-    arr q_desired = komo.getConfiguration_qAll(komo.T - 1);
-    arr velB = q_desired - S.get_q();
-    //set the velocity of robot B
-    for (int i = 0; i < 7; i++)
+    if (StartMotionGenerator)
     {
-      vel.elem(i) = double(10) * velB.elem(i);
-    }
-    //move the robot
-    S.step(vel, tau, S._velocity);
-    //rai::wait(tau);
-    C.setJointState(S.get_q());
-    V.setConfiguration(C);
-    t += tau;
-    cout << t * 100 << endl;
-    if (!(int(t * 100) % 400))
-    {
-      rai::wait(double(2));
+      //compute the pose on the circle in each step in y-z plane
+      target(1) = center(1) + radius * cos(angular_velocity * t);
+      target(2) = center(2) + radius * sin(angular_velocity * t);
+      target_frame->setPose(target);
+
+      //create a solver
+      KOMO komo;
+      komo.setModel(C, true);
+      //tell it use C as the basic configuration (internally, it will create copies of C on which the actual optimization runs)
+      komo.setTiming(1., 1, tau, 1);         //we want to optimize a single step (1 phase, 1 step/phase, duration=1, k_order=1)
+      komo.add_qControlObjective({}, 1, 1.); //sos-penalize (with weight=1.) the finite difference joint velocity (k_order=1) between x[-1] (current configuration) and x[0] (to be optimized)
+
+      komo.addObjective({}, FS_positionDiff, {"boardred", "target_frame"}, OT_sos, {1e2}, {0, 0, 0});
+      komo.addObjective({}, FS_scalarProductXZ, {"world", "boardred"}, OT_eq, {1e3}, {1});
+      komo.optimize();
+      arr q_desired = komo.getConfiguration_qAll(komo.T - 1);
+      arr velB = q_desired - S.get_q();
+      //set the velocity of robot B
+      for (int i = 0; i < 7; i++)
+      {
+        vel.elem(i) = double(10) * velB.elem(i);
+      }
+      //move the robot
+      S.step(vel, tau, S._velocity);
+      //rai::wait(tau);
+      C.setJointState(S.get_q());
+      V.setConfiguration(C);
+      t += tau;
+      if (!(int(t * 100) % 300))
+      {
+        ReadyThrow = true;
+        StartMotionGenerator = false;
+      }
     }
   }
 }
@@ -278,10 +282,6 @@ void move()
     bool seecylinder = false;
 
     //detect the cylinder
-    //set the intrinsic camera parameters
-    double f = 0.895;
-    f *= 360.; //focal length is needed in pixels (height!), not meters!
-    arr Fxypxy = {f, f, 320., 180.};
 
     byteA _rgb;
     floatA _depth;
@@ -353,7 +353,6 @@ void move()
 
       for (uint t = 0; t < 1000; t++)
       {
-        cout << "t: " << t << endl;
         //grab sensor readings from the simulation
 
         q = S.get_q();
@@ -370,9 +369,7 @@ void move()
         komo3.add_qControlObjective({}, 1, 1.); //sos-penalize (with weight=1.) the finite difference joint velocity (k_order=1) between x[-1] (current configuration) and x[0] (to be optimized)
 
         komo3.addObjective({}, FS_positionDiff, {"object", "R_gripperCenter"}, OT_sos, {1e3}, {0, 0, 0.01});
-        //komo.addObjective({}, FS_distance, {"R_gripperCenter", "object"}, OT_sos, {1e4});
         komo3.addObjective({}, FS_scalarProductYZ, {"R_gripperCenter", "world"}, OT_eq, {1e3}, {1});
-        //komo3.addObjective({}, FS_scalarProductXZ, {"world", "R_gripperCenter"}, OT_eq, {1e3}, {-1});
         komo3.addObjective({}, FS_distance, {"R_finger1", "object"}, OT_ineq, {1e3}, {-0.01});
         komo3.addObjective({}, FS_distance, {"R_finger2", "object"}, OT_ineq, {1e3}, {-0.01});
         komo3.optimize();
@@ -443,69 +440,92 @@ void move()
         }
       }
       //start move robotA
-      //StartMotionGenerator = true;
+      StartMotionGenerator = true;
+      ReadyThrow = false;
 
       //detect dartboard
-
-      S.getImageAndDepth(_rgb, _depth); //we don't need images with 100Hz, rendering is slow
-                                        // NEW
-      depthData2pointCloud(points, _depth, Fxypxy);
-      camera_pose = cameraFrame->get_X(); //this is relative to "/base_link"
-      //transform to world frame
-      camera_pose.applyOnPointArray(points);
-      worldFrame->setPointCloud(points, _rgb);
-      V.recopyMeshes(C); //update the model display!
-      V.setConfiguration(C);
-
-      rgb = CV(_rgb);
-      depth = CV(_depth);
-
-      //--<< perception pipeline
-      binary = filter_red_pixel(rgb);
-      //get contour
-      contours = get_contour(binary);
-      bool seeboard = false;
-      //calculate the 2D center
-      if (contours.size() != 0)
+      while (!ReadyThrow)
       {
-        seeboard = true;
-        std::vector<cv::Point> contour = contours[0];
-        cv::Mat rgb_contour = draw_contour(rgb, contours);
-        cv::imshow("board", rgb_contour);
-        int k = cv::waitKey(0);
-        cv::Moments mu = cv::moments(contour, true);
-        double Z = get_meandepth(depth, binary);
-        //create a sphere in the mode world
-        double x = mu.m10 / mu.m00;
-        double y = mu.m01 / mu.m00;
-        double X = (x - 320) * Z / f;
-        double Y = (y - 180) * Z / f;
-        arr obj_position = {X, -Y, -Z};
+        S.getImageAndDepth(_rgb, _depth);
+        // NEW
+        depthData2pointCloud(points, _depth, Fxypxy);
+        camera_pose = cameraFrame->get_X();
         //transform to world frame
-        if (!camera_pose.isZero())
-          camera_pose.applyOnPoint(obj_position);
-        obj->setPosition(obj_position);
+        camera_pose.applyOnPointArray(points);
+        //worldFrame->setPointCloud(points, _rgb);
+        V.recopyMeshes(C); //update the model display!
+        V.setConfiguration(C);
+
+        rgb = CV(_rgb);
+        depth = CV(_depth);
+
+        //--<< perception pipeline
+        binary = filter_red_pixel(rgb);
+        //get contour
+        contours = get_contour(binary);
+        bool seeboard = false;
+        //calculate the 2D center
+        if (contours.size() != 0)
+        {
+          seeboard = true;
+          std::vector<cv::Point> contour = contours[0];
+          //cv::Mat rgb_contour = draw_contour(rgb, contours);
+          //cv::imshow("board", rgb_contour);
+          //int k = cv::waitKey(0);
+          cv::Moments mu = cv::moments(contour, true);
+          double Z = get_meandepth(depth, binary);
+          //create a sphere in the mode world
+          double x = mu.m10 / mu.m00;
+          double y = mu.m01 / mu.m00;
+          double X = (x - 320) * Z / f;
+          double Y = (y - 180) * Z / f;
+          arr obj_position = {X, -Y, -Z};
+          //transform to world frame
+          if (!camera_pose.isZero())
+            camera_pose.applyOnPoint(obj_position);
+          obj->setPosition(obj_position);
+        }
+        C.setJointState(S.get_q()); //set your working config into the optimized state
+        V.setConfiguration(C);
+        rai::wait(tau);
+        //move to the pose in front of the object and higher than it because of gravity
+        KOMO komo5; //create a solver
+        komo5.setModel(C, true);
+        //tell it use C as the basic configuration (internally, it will create copies of C on which the actual optimization runs)
+        komo5.setTiming(1., 1, tau, 1);         //we want to optimize a single step (1 phase, 1 step/phase, duration=1, k_order=1)
+        komo5.add_qControlObjective({}, 1, 1.); //sos-penalize (with weight=1.) the finite difference joint velocity (k_order=1) between x[-1] (current configuration) and x[0] (to be optimized)
+        komo5.addObjective({1.}, FS_positionDiff, {"R_gripperCenter", "object"}, OT_sos, {1e2}, {-1.7, 0, 0});
+        komo5.addObjective({1.}, FS_scalarProductZZ, {"R_gripperCenter", "world"}, OT_eq, {1e3}, {1});
+        komo5.addObjective({1.}, FS_scalarProductYX, {"R_gripperCenter", "world"}, OT_eq, {1e3}, {1});
+        komo5.optimize();
+        arr q_desired = komo5.getConfiguration_qAll(komo5.T - 1);
+        arr velA = q_desired - S.get_q();
+        //set the velocity of robot A
+        for (int i = 7; i < 14; i++)
+        {
+          vel.elem(i) = double(10) * velA.elem(i);
+        }
+        //move the robot
+        S.step(vel, tau, S._velocity);
       }
-      C.setJointState(S.get_q()); //set your working config into the optimized state
-      V.setConfiguration(C);
 
       float t_fly = 0.3;
       //move to the pose in front of the object and higher than it because of gravity
-      KOMO komo5; //create a solver
-      komo5.setModel(C, true);
+      KOMO komo6; //create a solver
+      komo6.setModel(C, true);
       //tell it use C as the basic configuration (internally, it will create copies of C on which the actual optimization runs)
-      komo5.setTiming(1., step, tau * step, 1); //we want to optimize a single step (1 phase, 1 step/phase, duration=1, k_order=1)
-      komo5.add_qControlObjective({}, 1, 1.);   //sos-penalize (with weight=1.) the finite difference joint velocity (k_order=1) between x[-1] (current configuration) and x[0] (to be optimized)
+      komo6.setTiming(1., step, tau * step, 1); //we want to optimize a single step (1 phase, 1 step/phase, duration=1, k_order=1)
+      komo6.add_qControlObjective({}, 1, 1.);   //sos-penalize (with weight=1.) the finite difference joint velocity (k_order=1) between x[-1] (current configuration) and x[0] (to be optimized)
       float z = g * t_fly * t_fly / 2;
-      komo5.addObjective({1.}, FS_positionDiff, {"R_gripperCenter", "object"}, OT_sos, {1e2}, {-1.5, 0, z});
-      komo5.addObjective({1.}, FS_scalarProductZZ, {"R_gripperCenter", "world"}, OT_eq, {1e3}, {1});
-      komo5.addObjective({1.}, FS_scalarProductYX, {"R_gripperCenter", "world"}, OT_eq, {1e3}, {1});
-      komo5.optimize();
+      komo6.addObjective({1.}, FS_positionDiff, {"R_gripperCenter", "object"}, OT_sos, {1e2}, {-1.5, 0, z});
+      komo6.addObjective({1.}, FS_scalarProductZZ, {"R_gripperCenter", "world"}, OT_eq, {1e3}, {1});
+      komo6.addObjective({1.}, FS_scalarProductYX, {"R_gripperCenter", "world"}, OT_eq, {1e3}, {1});
+      komo6.optimize();
       //lift the gripper to the initial pose of the ball
       for (int t = 0; t < step; t++)
       {
         rai::wait(tau);
-        q = komo5.getConfiguration_qAll(t);
+        q = komo6.getConfiguration_qAll(t);
         S.step();
         S.setMoveTo(q, tau);
         C.setJointState(S.get_q()); //set your robot model to match the real q
@@ -519,20 +539,6 @@ void move()
       V.setConfiguration(C);
       arr release_pose = RealWorld["R_gripperCenter"]->getPosition();
       //compute jacobian
-
-      //auto diff = C.feature(FS_positionDiff, {"R_gripperCenter", "object"})->eval(C);
-      //  auto vecX = C.feature(FS_scalarProductXZ, {"R_gripperCenter", "world"})->eval(C);
-
-      //stack them
-      //arr y, J;
-      //
-      //y.append(1e0 * diff.y); //multiply, to make faster
-      //J.append(1e0 * diff.J);
-      //
-      //y.append(vecX.y - arr{0.}); //subtract target, here scalarProduct=0
-      //J.append(vecX.J);
-      //
-      //arr vel = 2. * pseudoInverse(J, NoArr, 1e-2) * (-y);
       diff = C.feature(FS_position, {"R_gripperCenter"})->eval(C);
       //transform it to joint velocity
       arr vel_q = pseudoInverse(diff.J, NoArr) * vel_cart;
@@ -557,7 +563,7 @@ void move()
       for (int i = 0; i < 10; i++)
       {
         cout << "length" << length(release_pose - RealWorld["R_gripperCenter"]->getPosition()) << std::endl;
-        if (length(release_pose - RealWorld["R_gripperCenter"]->getPosition()) < 0.06)
+        if (length(release_pose - RealWorld["R_gripperCenter"]->getPosition()) < 0.03)
         {
           cout << "release" << std::endl;
           S.openGripper("R_gripper", 0.15, 3);
@@ -594,7 +600,7 @@ void move()
       {
         arr po1 = RealWorld["dart1"]->getPosition();
 
-        S.step(vel, tau, S._velocity);
+        S.step();
         position = RealWorld["dart1"]->getPosition();
         motion_frame->setPosition(position);
         C.setJointState(S.get_q());
@@ -622,7 +628,7 @@ int main(int argc, char **argv)
   V.setConfiguration(C, "model");
 
   //motion generation for RobotA
-  arr const center = {1.7, 0, 1.5, 0, 0, 1, 0};
+  arr const center = {0.3782, -0.0187, 1};
   double const radius = 0.2;
   double const angular_velocity = 2 * M_PI / 5;
   //thread for the left robot, move to the generated motion
