@@ -13,7 +13,7 @@ table2 (world){
 }
 
 tables3(world){
-  shape:ssBox, Q:<t(-1.7 0.6 1.0) d(90 0 0 1)>, size:[.2 .7 .05 .01], color:[.3 .3 .3]
+  shape:ssBox, Q:<t(-1.8 0.6 1.0) d(90 0 0 1)>, size:[.2 .8 .05 .01], color:[.3 .3 .3]
     contact, logical:{ }
     friction:.1
 }
@@ -48,8 +48,8 @@ boardframe(boardred){ Q:<t(0 0 0) d(0 0 1 0)> shape:marker, size:[0.3 0.3 0.3], 
 
 
 dart1{ shape:cylinder, size:[0.15 0.01], color:[0 0 255],mass:0.2,X:<[-1.5,0.6, 1.07, 0, 0, 1, 0]>,contact=1}
-dart2{ shape:cylinder, size:[0.15 0.01], color:[0 0 255],mass:0.2,X:<[-1.7,0.6, 1.07, 0, 0, 1, 0]>,contact=1}
-dart3{ shape:cylinder, size:[0.15 0.01], color:[0 0 255],mass:0.2,X:<[-1.9,0.6, 1.07, 0, 0, 1, 0]>,contact=1}
+
+dart3{ shape:cylinder, size:[0.15 0.01], color:[0 0 255],mass:0.2,X:<[-1.6,0.6, 1.07, 0, 0, 1, 0]>,contact=1}
 
 
 Edit L_finger1{ joint:rigid }
