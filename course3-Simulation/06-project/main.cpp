@@ -423,7 +423,6 @@ void move()
         //tell it use C as the basic configuration (internally, it will create copies of C on which the actual optimization runs)
         komo4.setTiming(2., step, tau * step, 2); //we want to optimize a single step (1 phase, 1 step/phase, duration=1, k_order=1)
         komo4.add_qControlObjective({}, 2, 1.);   //sos-penalize (with weight=1.) the finite difference joint velocity (k_order=1) between x[-1] (current configuration) and x[0] (to be optimized)
-
         komo4.addObjective({1.}, FS_positionDiff, {"R_gripperCenter", "object"}, OT_sos, {1e2}, {0, 0, 0.5});
         komo4.addObjective({1.}, FS_scalarProductYZ, {"R_gripperCenter", "world"}, OT_eq, {1e2}, {1});
         komo4.addObjective({2.}, FS_scalarProductZZ, {"R_gripperCenter", "world"}, OT_eq, {1e3}, {1});
@@ -518,73 +517,84 @@ void move()
       motion_frame->setPosition(position);
       V.setConfiguration(C);
       arr release_pose = RealWorld["R_gripperCenter"]->getPosition();
-      //compute jacobian
 
-      //auto diff = C.feature(FS_positionDiff, {"R_gripperCenter", "object"})->eval(C);
-      //  auto vecX = C.feature(FS_scalarProductXZ, {"R_gripperCenter", "world"})->eval(C);
-
-      //stack them
-      //arr y, J;
-      //
-      //y.append(1e0 * diff.y); //multiply, to make faster
-      //J.append(1e0 * diff.J);
-      //
-      //y.append(vecX.y - arr{0.}); //subtract target, here scalarProduct=0
-      //J.append(vecX.J);
-      //
-      //arr vel = 2. * pseudoInverse(J, NoArr, 1e-2) * (-y);
-      diff = C.feature(FS_position, {"R_gripperCenter"})->eval(C);
-      //transform it to joint velocity
-      arr vel_q = pseudoInverse(diff.J, NoArr) * vel_cart;
-      //move backwars firstly
-      for (int i = 7; i < 14; i++)
-      {
-        vel.elem(i) = -vel_q.elem(i);
-      }
-
-      for (int i = 0; i < 3; i++)
-      {
-        S.step(vel, tau, S._velocity);
-        position = RealWorld["dart1"]->getPosition();
-        motion_frame->setPosition(position);
-        rai::wait();
-      }
-      C.setJointState(S.get_q());
-      for (int i = 7; i < 14; i++)
-      {
-        vel.elem(i) = -vel.elem(i);
-      }
+      //move backwards firstly
       for (int i = 0; i < 10; i++)
       {
+        //compute jacobian
+        diff = C.feature(FS_position, {"R_gripperCenter"})->eval(C);
+        auto vecX = C.feature(FS_scalarProductZZ, {"R_gripperCenter", "world"})->eval(C);
+        //stack them
+        arr y, J;
+
+        y.append(vel_cart); //multiply, to make faster
+        J.append(diff.J);
+
+        y.append(vecX.y - arr{1.}); //subtract target, here scalarProduct=0
+        J.append(vecX.J);
+        //transform it to joint velocity
+        arr vel_q = pseudoInverse(J, NoArr) * y;
+        for (int i = 7; i < 14; i++)
+        {
+          vel.elem(i) = -vel_q.elem(i);
+        }
+        S.step(vel, tau / 10, S._velocity);
+        C.setJointState(S.get_q());
+        V.setConfiguration(C);
+      }
+      //move forwards
+      for (int i = 0; i < 10; i++)
+      {
+        //compute jacobian
+        diff = C.feature(FS_position, {"R_gripperCenter"})->eval(C);
+        auto vecX = C.feature(FS_scalarProductZZ, {"R_gripperCenter", "world"})->eval(C);
+        //stack them
+        arr y, J;
+
+        y.append(vel_cart); //multiply, to make faster
+        J.append(diff.J);
+
+        y.append(vecX.y - arr{1.}); //subtract target, here scalarProduct=0
+        J.append(vecX.J);
+        //transform it to joint velocity
+        arr vel_q = pseudoInverse(J, NoArr) * y;
+        for (int i = 7; i < 14; i++)
+        {
+          vel.elem(i) = vel_q.elem(i);
+        }
+        S.step(vel, tau / 10, S._velocity);
+        C.setJointState(S.get_q());
+        V.setConfiguration(C);
         cout << "length" << length(release_pose - RealWorld["R_gripperCenter"]->getPosition()) << std::endl;
-        if (length(release_pose - RealWorld["R_gripperCenter"]->getPosition()) < 0.06)
+        if (length(release_pose - RealWorld["R_gripperCenter"]->getPosition()) < 0.01)
         {
           cout << "release" << std::endl;
-          S.openGripper("R_gripper", 0.15, 3);
-          S.step(vel, tau, S._velocity);
-          S.step(vel, tau, S._velocity);
-          //for (int i = 7; i < 14; i++)
-          //{
-          //  vel.elem(i) = 0;
-          //}
+          S.openGripper("R_gripper", 0.15, 5);
+          for (int m = 0; m < 5; m++)
+          {
+            diff = C.feature(FS_position, {"R_gripperCenter"})->eval(C);
+            vecX = C.feature(FS_scalarProductZZ, {"R_gripperCenter", "world"})->eval(C);
+            //stack them
+            arr y2, J2;
+
+            y2.append(vel_cart); //multiply, to make faster
+            J2.append(diff.J);
+
+            y2.append(vecX.y - arr{1.}); //subtract target, here scalarProduct=0
+            J2.append(vecX.J);
+            vel_q = pseudoInverse(J2, NoArr) * y2;
+            for (int i = 7; i < 14; i++)
+            {
+              vel.elem(i) = vel_q.elem(i);
+            }
+            S.step(vel, tau / 10, S._velocity);
+            C.setJointState(S.get_q());
+            V.setConfiguration(C);
+          }
           break;
         }
-        arr po1_q = S.get_q();
-        arr po1_tcp = RealWorld["R_gripperCenter"]->getPosition();
-        S.step(vel, tau, S._velocity);
-        arr po2_tcp = RealWorld["R_gripperCenter"]->getPosition();
-        arr po2_q = S.get_q();
-        cout << "joint_vel" << (po2_q - po1_q) / tau << endl;
-        cout << "joint_vel_should" << vel_q << endl;
-        cout << "tcp_vel" << (po2_tcp - po1_tcp) / tau << endl;
-        cout << "tcp_vel_should" << vel_cart << endl;
-        position = RealWorld["dart1"]->getPosition();
-        motion_frame->setPosition(position);
-        rai::wait();
       }
-      C.setJointState(S.get_q());
-      V.setConfiguration(C);
-
+      //set velocity to zero
       for (int i = 7; i < 14; i++)
       {
         vel.elem(i) = 0;
