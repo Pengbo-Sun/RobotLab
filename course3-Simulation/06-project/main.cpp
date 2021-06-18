@@ -494,7 +494,7 @@ void move()
         //tell it use C as the basic configuration (internally, it will create copies of C on which the actual optimization runs)
         komo5.setTiming(1., 1, tau, 1);         //we want to optimize a single step (1 phase, 1 step/phase, duration=1, k_order=1)
         komo5.add_qControlObjective({}, 1, 1.); //sos-penalize (with weight=1.) the finite difference joint velocity (k_order=1) between x[-1] (current configuration) and x[0] (to be optimized)
-        komo5.addObjective({1.}, FS_positionDiff, {"R_gripperCenter", "object"}, OT_sos, {1e2}, {-1.9, 0, 0});
+        komo5.addObjective({1.}, FS_positionDiff, {"R_gripperCenter", "object"}, OT_sos, {1e2}, {-1.5, 0, 0});
         komo5.addObjective({1.}, FS_scalarProductZZ, {"R_gripperCenter", "world"}, OT_eq, {1e3}, {1});
         komo5.addObjective({1.}, FS_scalarProductYX, {"R_gripperCenter", "world"}, OT_eq, {1e3}, {1});
         komo5.optimize();
@@ -633,7 +633,7 @@ int main(int argc, char **argv)
   V.setConfiguration(C, "model");
 
   //motion generation for RobotA
-  arr const center = {0.2, -0.0187, 0.9};
+  arr const center = {0.3782, -0.0187, 0.9};
   double const radius = 0.1;
   double const angular_velocity = 2 * M_PI / 2;
   //thread for the left robot, move to the generated motion
