@@ -165,8 +165,8 @@ void generate_circular_motion(arr const center, double const radius, double cons
   KOMO komo1;
   komo1.setModel(C, true);
   //tell it use C as the basic configuration (internally, it will create copies of C on which the actual optimization runs)
-  komo1.setTiming(1., step, step * tau, 1); //we want to optimize a single step (1 phase, 1 step/phase, duration=1, k_order=1)
-  komo1.add_qControlObjective({}, 1, 1.);   //sos-penalize (with weight=1.) the finite difference joint velocity (k_order=1) between x[-1] (current configuration) and x[0] (to be optimized)
+  komo1.setTiming(1., step, tau, 1);      //we want to optimize a single step (1 phase, 1 step/phase, duration=1, k_order=1)
+  komo1.add_qControlObjective({}, 1, 1.); //sos-penalize (with weight=1.) the finite difference joint velocity (k_order=1) between x[-1] (current configuration) and x[0] (to be optimized)
   //komo1.addObjective({}, FS_position, {"L_gripper"}, OT_eq, {1e3}, {0.3782, -0.0187, 0.8});//max z=1.2
   komo1.addObjective({}, FS_position, {"L_gripper"}, OT_eq, {1e3}, center);
   komo1.addObjective({}, FS_scalarProductXZ, {"world", "boardred"}, OT_eq, {1e3}, {1});
@@ -201,7 +201,7 @@ void generate_circular_motion(arr const center, double const radius, double cons
       komo.setTiming(1., 1, tau, 1);         //we want to optimize a single step (1 phase, 1 step/phase, duration=1, k_order=1)
       komo.add_qControlObjective({}, 1, 1.); //sos-penalize (with weight=1.) the finite difference joint velocity (k_order=1) between x[-1] (current configuration) and x[0] (to be optimized)
 
-      komo.addObjective({}, FS_positionDiff, {"boardred", "target_frame"}, OT_sos, {1e2}, {0, 0, 0});
+      komo.addObjective({}, FS_positionDiff, {"L_gripper", "target_frame"}, OT_sos, {1e2}, {0, 0, 0});
       komo.addObjective({}, FS_scalarProductXZ, {"world", "boardred"}, OT_eq, {1e3}, {1});
       komo.optimize();
       arr q_desired = komo.getConfiguration_qAll(komo.T - 1);
@@ -411,6 +411,7 @@ void move()
         //send no controls to the simulation
         S.step(vel, tau, S._velocity);
       }
+      S.step();
       rai::wait();
 
       if (grasped)
@@ -506,7 +507,7 @@ void move()
           vel.elem(i) = double(10) * velA.elem(i);
         }
         //move the robot
-        //S.step(vel, tau, S._velocity);
+        S.step(vel, tau, S._velocity);
       }
 
       float t_fly = 0.3;
@@ -633,8 +634,8 @@ int main(int argc, char **argv)
   V.setConfiguration(C, "model");
 
   //motion generation for RobotA
-  arr const center = {0.3782, -0.0187, 1};
-  double const radius = 0;
+  arr const center = {0.3782, -0.0187, 0.9};
+  double const radius = 0.1;
   double const angular_velocity = 2 * M_PI / 2;
   //thread for the left robot, move to the generated motion
   std::thread l_robot(generate_circular_motion, center, radius, angular_velocity);
