@@ -506,7 +506,7 @@ void move()
           vel.elem(i) = double(10) * velA.elem(i);
         }
         //move the robot
-        S.step(vel, tau, S._velocity);
+        //S.step(vel, tau, S._velocity);
       }
 
       float t_fly = 0.3;
@@ -633,8 +633,8 @@ int main(int argc, char **argv)
   V.setConfiguration(C, "model");
 
   //motion generation for RobotA
-  arr const center = {0.3782, -0.0187, 0.9};
-  double const radius = 0.1;
+  arr const center = {0.3782, -0.0187, 1};
+  double const radius = 0;
   double const angular_velocity = 2 * M_PI / 2;
   //thread for the left robot, move to the generated motion
   std::thread l_robot(generate_circular_motion, center, radius, angular_velocity);
