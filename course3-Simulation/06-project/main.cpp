@@ -411,7 +411,7 @@ void move()
         //send no controls to the simulation
         S.step(vel, tau, S._velocity);
       }
-      S.step();
+      //S.step();
       rai::wait();
 
       if (grasped)
@@ -567,7 +567,7 @@ void move()
       }
       //rai::wait();
       //move forwards
-      for (int i = 0; i < 15; i++)
+      for (int i = 0; i < 20; i++)
       {
         //compute jacobian
         motion_pose += vel_cart * tau;
@@ -589,11 +589,11 @@ void move()
         C.setJointState(S.get_q());
         V.setConfiguration(C);
         cout << "length" << length(release_pose - RealWorld["R_gripperCenter"]->getPosition()) << std::endl;
-        if (length(release_pose - RealWorld["R_gripperCenter"]->getPosition()) < 0.04)
+        if (length(release_pose - RealWorld["R_gripperCenter"]->getPosition()) < 0.02)
         {
           cout << "release" << std::endl;
           S.openGripper("R_gripper", 0.15, 5);
-          i = 13;
+          i = 18;
         }
       }
       //set velocity to zero
@@ -635,7 +635,7 @@ int main(int argc, char **argv)
 
   //motion generation for RobotA
   arr const center = {0.3782, -0.0187, 0.9};
-  double const radius = 0.1;
+  double const radius = 0.05;
   double const angular_velocity = 2 * M_PI / 2;
   //thread for the left robot, move to the generated motion
   std::thread l_robot(generate_circular_motion, center, radius, angular_velocity);
