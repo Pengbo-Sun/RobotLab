@@ -2,13 +2,13 @@ cmake_minimum_required(VERSION 3.4)
 
 project(RaiRoboticsCourse)
 
-find_package( OpenCV REQUIRED )
+find_package( OpenCV 3.4 REQUIRED )
 find_package( Bullet REQUIRED )
 
 add_subdirectory(pybind11)
 
 add_compile_options(
-  -O3 -g -Wall -fPIC -std=c++14 -Wno-terminate -Wno-pragmas
+  -O3 -g -Wall -fPIC -std=c++14 -Wno-terminate -Wno-pragmas -pthread
   )
 
 add_definitions(

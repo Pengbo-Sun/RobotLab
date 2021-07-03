@@ -271,6 +271,7 @@ void grasp_the_hopping_ball()
         {
           rai::wait(time);
           S.step(q_lift, time, S._position);
+          //velocity is better
         }
       }
       else
@@ -516,8 +517,8 @@ int main(int argc, char **argv)
 {
   rai::initCmdLine(argc, argv);
 
-  //grasp_the_hopping_ball();
-  throw_the_hopping_ball();
+  grasp_the_hopping_ball();
+  //throw_the_hopping_ball();
 
   return 0;
 }
